@@ -1,0 +1,10 @@
+# Secrets (절대 GitHub에 올리면 안됨!)
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Local results
+results/
