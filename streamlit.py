@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import time
-import json
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -10,13 +9,9 @@ from google.oauth2.service_account import Credentials
 # 1. Google Sheets 설정
 # ==========================================
 
-# Streamlit Cloud에서는 secrets로 관리
-# secrets.toml 또는 Streamlit Cloud Settings에서 설정
-
 def get_google_sheet():
     """Google Sheet 연결"""
     try:
-        # Streamlit Cloud secrets에서 credentials 가져오기
         creds_dict = st.secrets["gcp_service_account"]
         sheet_id = st.secrets["sheet_id"]
 
@@ -41,20 +36,18 @@ def save_to_sheets(responses, participant_name):
         return False
 
     try:
-        # 헤더가 없으면 추가
         existing = sheet.get_all_values()
         if len(existing) == 0:
-            headers = ["participant", "phase", "step", "choice", "ss_amount", "ll_amount", "rt_sec", "submitted_at"]
+            headers = ["participant", "task", "item", "choice", "ss_amount", "ll_amount", "rt_sec", "submitted_at"]
             sheet.append_row(headers)
 
-        # 모든 데이터를 한 번에 추가 (순서 보장)
         submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         rows = []
         for r in responses:
             row = [
                 participant_name,
-                r.get("phase", ""),
-                r.get("step", ""),
+                r.get("task", ""),
+                r.get("item", ""),
                 r.get("choice", ""),
                 r.get("ss_amount", ""),
                 r.get("ll_amount", ""),
@@ -63,7 +56,6 @@ def save_to_sheets(responses, participant_name):
             ]
             rows.append(row)
 
-        # batch로 한 번에 추가
         sheet.append_rows(rows)
         return True
     except Exception as e:
@@ -74,106 +66,28 @@ def save_to_sheets(responses, participant_name):
 # 2. 초기화 및 설정
 # ==========================================
 
-def init_session():
-    if 'responses' not in st.session_state:
-        st.session_state.responses = []
-
-    if 'current_phase' not in st.session_state:
-        st.session_state.current_phase = 'intro'
-
-    if 'val_index' not in st.session_state:
-        st.session_state.val_index = 2
-
-    if 'step' not in st.session_state:
-        st.session_state.step = 1
-
-    if 'indifference_val' not in st.session_state:
-        st.session_state.indifference_val = 550000
-
-    if 'participant_name' not in st.session_state:
-        st.session_state.participant_name = ""
-
-    if 'question_start_time' not in st.session_state:
-        st.session_state.question_start_time = time.time()
-
-    # 중복 클릭 방지용
-    if 'processing' not in st.session_state:
-        st.session_state.processing = False
-
-# ==========================================
-# 3. Part 1~3: 한국형 금액 리스트 (KRW)
-# ==========================================
-
+# 금액 리스트 (101%, 102%, 110%, 120%, 150%)
 VALUES_SMALL = [505000, 510000, 550000, 600000, 750000]
 VALUES_LARGE = [5050000, 5100000, 5500000, 6000000, 7500000]
 
-def get_baseline_options(phase, idx):
-    idx = max(0, min(idx, 4))
-    if phase == 'p3_large':
-        base = 5000000
-        ll_val = VALUES_LARGE[idx]
-    else:
-        base = 500000
-        ll_val = VALUES_SMALL[idx]
-    return base, ll_val
+# 6개 과제 블록 정의
+TASKS = [
+    {"id": "t1_small_gain", "base": 500000, "vals": VALUES_SMALL, "type": "gain"},
+    {"id": "t2_loss", "base": 500000, "vals": VALUES_SMALL, "type": "loss"},
+    {"id": "t3_large_gain", "base": 5000000, "vals": VALUES_LARGE, "type": "gain"},
+    {"id": "t4_present_bias", "base": 500000, "vals": VALUES_SMALL, "type": "pb"},
+    {"id": "t5_subadditivity", "base": 500000, "vals": VALUES_SMALL, "type": "sub"},
+    {"id": "t6_speedup", "base": 500000, "vals": VALUES_SMALL, "type": "speedup"},
+]
 
-def update_index(phase, choice, current_idx):
-    new_idx = current_idx
-    if phase == 'p2_loss':
-        if choice == 'SS': new_idx -= 1
-        else: new_idx += 1
-    else:
-        if choice == 'SS': new_idx += 1
-        else: new_idx -= 1
-    return max(0, min(new_idx, 4))
-
-# ==========================================
-# 4. Part 4: Anomalies (원화 적용)
-# ==========================================
-
-def get_anomaly_question(step):
-    ip_val = st.session_state.indifference_val
-    base = 500000
-
-    if step == 1:
-        return {
-            "ss_txt": f"12개월 후 {base:,}원 받기",
-            "ll_txt": f"24개월 후 {ip_val:,}원 받기",
-            "ss_val": base, "ll_val": ip_val
-        }
-    elif step == 2:
-        diff = ip_val - base
-        sub_val = base + (diff * 2)
-        return {
-            "ss_txt": f"지금 {base:,}원 받기",
-            "ll_txt": f"24개월 후 {sub_val:,}원 받기",
-            "ss_val": base, "ll_val": sub_val
-        }
-    elif step == 3:
-        return {
-            "ss_txt": "지금 500,000원 받기",
-            "ll_txt": "1년 미루고 보너스 포함 600,000원 받기",
-            "ss_val": 500000, "ll_val": 600000
-        }
-    elif step == 4:
-        return {
-            "ss_txt": "1년 뒤 600,000원을 지금으로 앞당겨 500,000원 받기",
-            "ll_txt": "원래대로 1년 뒤 600,000원 받기",
-            "ss_val": 500000, "ll_val": 600000
-        }
-    return None
-
-# ==========================================
-# 5. Part 5: Survey (한국 실정 반영)
-# ==========================================
-
+# 설문 데이터
 SURVEY_DATA = [
     {"id": "age", "type": "number", "q": "귀하의 연령(만 나이)은?", "min": 18, "max": 100},
     {"id": "gender", "type": "select", "q": "성별은?", "opts": ["남성", "여성", "기타"]},
     {"id": "edu", "type": "select", "q": "최종 학력은?",
-     "opts": ["초등학교 졸업 이하", "중학교 졸업", "고등학교 졸업 (기술/직업)", "대학교 졸업 (학사)", "대학원 졸업 (석/박사 이상)"]},
+     "opts": ["초등학교 졸업 이하", "중학교 졸업", "고등학교 졸업", "대학교 졸업 (학사)", "대학원 졸업 (석/박사 이상)"]},
     {"id": "job", "type": "select", "q": "현재 고용 상태는?",
-     "opts": ["전일제 근무 (Full-time)", "파트타임 근무", "자영업/프리랜서", "구직 중", "미취업 (개인 사유)", "학생 (전업)", "은퇴"]},
+     "opts": ["전일제 근무", "파트타임 근무", "자영업/프리랜서", "구직 중", "미취업", "학생", "은퇴"]},
     {"id": "income", "type": "number", "q": "세전 연간 총 소득(원)은?", "min": 0, "max": 10000000000},
     {"id": "debt", "type": "number", "q": "현재 총 부채(주택 대출 제외, 원)는?", "min": 0, "max": 10000000000},
     {"id": "asset", "type": "number", "q": "현재 총 자산(부동산/예금 포함, 원)은?", "min": 0, "max": 10000000000},
@@ -182,8 +96,26 @@ SURVEY_DATA = [
     {"id": "outlook_per", "type": "select", "q": "향후 1년 개인 재정 전망", "opts": ["좋아질 것이다", "비슷할 것이다", "나빠질 것이다"]}
 ]
 
+def init_session():
+    if 'responses' not in st.session_state:
+        st.session_state.responses = []
+    if 'current_phase' not in st.session_state:
+        st.session_state.current_phase = 'intro'
+    if 'task_idx' not in st.session_state:
+        st.session_state.task_idx = 0
+    if 'item_idx' not in st.session_state:
+        st.session_state.item_idx = 0
+    if 'survey_idx' not in st.session_state:
+        st.session_state.survey_idx = 0
+    if 'participant_name' not in st.session_state:
+        st.session_state.participant_name = ""
+    if 'question_start_time' not in st.session_state:
+        st.session_state.question_start_time = time.time()
+    if 'processing' not in st.session_state:
+        st.session_state.processing = False
+
 # ==========================================
-# 6. 메인 실행 함수
+# 3. 헬퍼 함수
 # ==========================================
 
 def reset_timer():
@@ -192,44 +124,70 @@ def reset_timer():
 def get_rt():
     return round(time.time() - st.session_state.question_start_time, 3)
 
-def record_response(choice, ss, ll, phase, step):
+def get_question_text(task, item_idx):
+    """과제 유형에 따른 질문 텍스트 생성"""
+    base = task['base']
+    target = task['vals'][item_idx]
+    task_type = task['type']
+
+    if task_type == 'loss':
+        question = f"**{base:,}원**을 내야 하는 상황입니다. 어떻게 하시겠습니까?"
+        ss_txt = f"지금 {base:,}원 내기"
+        ll_txt = f"1년 뒤 {target:,}원 내기"
+    elif task_type == 'pb':  # Present Bias (12mo vs 24mo)
+        question = "다음 중 어떤 옵션을 선택하시겠습니까?"
+        ss_txt = f"12개월 후 {base:,}원 받기"
+        ll_txt = f"24개월 후 {target:,}원 받기"
+    elif task_type == 'sub':  # Subadditivity (Now vs 24mo)
+        question = "다음 중 어떤 옵션을 선택하시겠습니까?"
+        ss_txt = f"지금 {base:,}원 받기"
+        ll_txt = f"24개월 후 {target:,}원 받기"
+    elif task_type == 'speedup':  # Speedup frame
+        question = "다음 중 어떤 옵션을 선택하시겠습니까?"
+        ss_txt = f"1년 뒤 {target:,}원을 앞당겨 지금 {base:,}원 받기"
+        ll_txt = f"원래대로 1년 뒤 {target:,}원 받기"
+    else:  # gain (small & large)
+        question = f"**{base:,}원**을 받을 수 있습니다. 어떻게 하시겠습니까?"
+        ss_txt = f"지금 {base:,}원 받기"
+        ll_txt = f"1년 뒤 {target:,}원 받기"
+
+    return question, ss_txt, ll_txt, base, target
+
+def record_response(choice, ss_val, ll_val, task_id, item_num):
     rt = get_rt()
     st.session_state.responses.append({
-        "phase": phase, "step": step, "choice": choice,
-        "ss_amount": ss, "ll_amount": ll,
+        "task": task_id,
+        "item": item_num,
+        "choice": choice,
+        "ss_amount": ss_val,
+        "ll_amount": ll_val,
         "rt_sec": rt
     })
-
-    if phase in ['p1_small', 'p2_loss', 'p3_large']:
-        if phase == 'p1_small' and step == 3:
-            current_ll = VALUES_SMALL[st.session_state.val_index]
-            st.session_state.indifference_val = current_ll if choice == 'LL' else VALUES_SMALL[max(0, st.session_state.val_index-1)]
-
-        if step < 3:
-            st.session_state.val_index = update_index(phase, choice, st.session_state.val_index)
-            st.session_state.step += 1
-        else:
-            st.session_state.step = 1
-            st.session_state.val_index = 2
-            if phase == 'p1_small': st.session_state.current_phase = 'p2_loss'
-            elif phase == 'p2_loss': st.session_state.current_phase = 'p3_large'
-            elif phase == 'p3_large': st.session_state.current_phase = 'p4_anomaly'
-
-    elif phase == 'p4_anomaly':
-        if step < 4: st.session_state.step += 1
-        else:
-            st.session_state.step = 1
-            st.session_state.current_phase = 'p5_survey'
-
     reset_timer()
+
+def next_question():
+    """다음 문항으로 이동"""
+    if st.session_state.item_idx < 4:
+        st.session_state.item_idx += 1
+    elif st.session_state.task_idx < 5:
+        st.session_state.task_idx += 1
+        st.session_state.item_idx = 0
+    else:
+        st.session_state.current_phase = 'survey'
+        st.session_state.survey_idx = 0
+
+# ==========================================
+# 4. 메인 함수
+# ==========================================
 
 def main():
     st.set_page_config(page_title="의사결정 실험", page_icon="📋")
     init_session()
-    phase = st.session_state.current_phase
-    step = st.session_state.step
 
-    # ===== INTRO: 참여자 이름 입력 =====
+    phase = st.session_state.current_phase
+    disabled = st.session_state.processing
+
+    # ===== INTRO =====
     if phase == 'intro':
         st.title("의사결정 실험")
         st.markdown("""
@@ -242,98 +200,48 @@ def main():
         if st.button("시작하기", type="primary"):
             if name.strip():
                 st.session_state.participant_name = name.strip()
-                st.session_state.current_phase = 'p1_small'
+                st.session_state.current_phase = 'task'
                 reset_timer()
                 st.rerun()
             else:
                 st.warning("이름을 입력해주세요.")
 
-    # ===== Part 1~3: 금액 선택 =====
-    elif phase in ['p1_small', 'p2_loss', 'p3_large']:
-        base, ll_val = get_baseline_options(phase, st.session_state.val_index)
+    # ===== TASK (30문항: 6블록 × 5문항) =====
+    elif phase == 'task':
+        t_idx = st.session_state.task_idx
+        i_idx = st.session_state.item_idx
+        task = TASKS[t_idx]
 
-        if phase == 'p2_loss':
-            st.markdown(f"**{base:,}원**을 내야 하는 상황입니다. 어떻게 하시겠습니까?")
-            t_ss, t_ll = f"지금 {base:,}원 내기", f"1년 뒤 {ll_val:,}원 내기"
-        else:
-            st.markdown(f"**{base:,}원**을 받을 수 있습니다. 어떻게 하시겠습니까?")
-            t_ss, t_ll = f"지금 {base:,}원 받기", f"1년 뒤 {ll_val:,}원 받기"
+        question, ss_txt, ll_txt, ss_val, ll_val = get_question_text(task, i_idx)
+        st.markdown(question)
 
         c1, c2 = st.columns(2)
-        disabled = st.session_state.processing
-        if c1.button(t_ss, use_container_width=True, disabled=disabled):
+        if c1.button(ss_txt, use_container_width=True, disabled=disabled):
             st.session_state.processing = True
-            record_response('SS', base, ll_val, phase, step)
+            record_response('SS', ss_val, ll_val, task['id'], i_idx + 1)
+            next_question()
             st.session_state.processing = False
             st.rerun()
-        if c2.button(t_ll, use_container_width=True, disabled=disabled):
+        if c2.button(ll_txt, use_container_width=True, disabled=disabled):
             st.session_state.processing = True
-            record_response('LL', base, ll_val, phase, step)
-            st.session_state.processing = False
-            st.rerun()
-
-    # ===== Part 4: Anomaly 질문 =====
-    elif phase == 'p4_anomaly':
-        q = get_anomaly_question(step)
-        st.markdown("**다음 중 어떤 옵션을 선택하시겠습니까?**")
-
-        c1, c2 = st.columns(2)
-        disabled = st.session_state.processing
-        if c1.button(q['ss_txt'], use_container_width=True, disabled=disabled):
-            st.session_state.processing = True
-            record_response('SS', q['ss_val'], q['ll_val'], phase, step)
-            st.session_state.processing = False
-            st.rerun()
-        if c2.button(q['ll_txt'], use_container_width=True, disabled=disabled):
-            st.session_state.processing = True
-            record_response('LL', q['ss_val'], q['ll_val'], phase, step)
+            record_response('LL', ss_val, ll_val, task['id'], i_idx + 1)
+            next_question()
             st.session_state.processing = False
             st.rerun()
 
-    # ===== Part 5: Survey =====
-    elif phase == 'p5_survey':
-        item = SURVEY_DATA[step-1]
+    # ===== SURVEY (10문항) =====
+    elif phase == 'survey':
+        s_idx = st.session_state.survey_idx
+        item = SURVEY_DATA[s_idx]
         st.markdown(f"**{item['q']}**")
-        disabled = st.session_state.processing
 
         if item['type'] == 'number':
-            ans = st.number_input("입력", min_value=item['min'], max_value=item['max'], key=f"s_{step}", label_visibility="collapsed")
+            ans = st.number_input("입력", min_value=item['min'], max_value=item['max'], key=f"s_{s_idx}", label_visibility="collapsed")
             if st.button("다음", disabled=disabled):
                 st.session_state.processing = True
-                record_response(ans, item['q'], "-", phase, step)
-                if step < 10:
-                    st.session_state.step += 1
-                    reset_timer()
-                    st.session_state.processing = False
-                    st.rerun()
-                else:
-                    save_to_sheets(st.session_state.responses, st.session_state.participant_name)
-                    st.session_state.current_phase = 'done'
-                    st.session_state.processing = False
-                    st.rerun()
-        elif item['type'] == 'select':
-            ans = st.radio("선택", item['opts'], key=f"s_{step}", label_visibility="collapsed")
-            if st.button("다음", disabled=disabled):
-                st.session_state.processing = True
-                record_response(ans, item['q'], "-", phase, step)
-                if step < 10:
-                    st.session_state.step += 1
-                    reset_timer()
-                    st.session_state.processing = False
-                    st.rerun()
-                else:
-                    save_to_sheets(st.session_state.responses, st.session_state.participant_name)
-                    st.session_state.current_phase = 'done'
-                    st.session_state.processing = False
-                    st.rerun()
-        elif item['type'] == 'slider':
-            ans = st.slider("선택", item['min'], item['max'], 5, key=f"s_{step}", label_visibility="collapsed")
-            if st.button("다음", disabled=disabled):
-                st.session_state.processing = True
-                record_response(ans, item['q'], "-", phase, step)
-                if step < 10:
-                    st.session_state.step += 1
-                    reset_timer()
+                record_response(ans, item['q'], "-", "survey", s_idx + 1)
+                if s_idx < 9:
+                    st.session_state.survey_idx += 1
                     st.session_state.processing = False
                     st.rerun()
                 else:
@@ -342,7 +250,37 @@ def main():
                     st.session_state.processing = False
                     st.rerun()
 
-    # ===== 완료 화면 =====
+        elif item['type'] == 'select':
+            ans = st.radio("선택", item['opts'], key=f"s_{s_idx}", label_visibility="collapsed")
+            if st.button("다음", disabled=disabled):
+                st.session_state.processing = True
+                record_response(ans, item['q'], "-", "survey", s_idx + 1)
+                if s_idx < 9:
+                    st.session_state.survey_idx += 1
+                    st.session_state.processing = False
+                    st.rerun()
+                else:
+                    save_to_sheets(st.session_state.responses, st.session_state.participant_name)
+                    st.session_state.current_phase = 'done'
+                    st.session_state.processing = False
+                    st.rerun()
+
+        elif item['type'] == 'slider':
+            ans = st.slider("선택", item['min'], item['max'], 5, key=f"s_{s_idx}", label_visibility="collapsed")
+            if st.button("다음", disabled=disabled):
+                st.session_state.processing = True
+                record_response(ans, item['q'], "-", "survey", s_idx + 1)
+                if s_idx < 9:
+                    st.session_state.survey_idx += 1
+                    st.session_state.processing = False
+                    st.rerun()
+                else:
+                    save_to_sheets(st.session_state.responses, st.session_state.participant_name)
+                    st.session_state.current_phase = 'done'
+                    st.session_state.processing = False
+                    st.rerun()
+
+    # ===== DONE =====
     elif phase == 'done':
         st.title("실험이 완료되었습니다")
         st.markdown("참여해 주셔서 감사합니다.")
