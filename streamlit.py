@@ -319,8 +319,20 @@ def main():
 
     # ===== DONE =====
     elif phase == 'done':
+        st.balloons()
+        
         st.markdown('<p class="done-title">✓ 실험이 완료되었습니다</p>', unsafe_allow_html=True)
-        st.markdown('<p class="done-text">참여해 주셔서 감사합니다.<br>창을 닫아주세요.</p>', unsafe_allow_html=True)
+        st.markdown('<p class="done-text">참여해 주셔서 감사합니다.<br>아래 버튼을 눌러 다음 실험으로 이동해 주세요.</p>', unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.link_button(
+                "▶ 다음 실험으로 이동",
+                "https://tom-101.streamlit.app/",
+                use_container_width=True
+            )
 
 if __name__ == "__main__":
     main()
