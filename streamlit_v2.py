@@ -318,27 +318,37 @@ def main():
             st.rerun()
 
     elif phase == 'break':
-        placeholder = st.empty()
+        # 다른 요소 숨기기
+        st.markdown("""
+        <style>
+        section[data-testid="stSidebar"] { display: none; }
+        .stProgress, .stButton, .question-text, .progress-counter { display: none !important; }
+        </style>
+        """, unsafe_allow_html=True)
         
-        while True:
-            elapsed = time.time() - st.session_state.break_start_time
-            remaining = max(0, BREAK_DURATION - elapsed)
+        elapsed = time.time() - st.session_state.break_start_time
+        remaining = max(0, BREAK_DURATION - elapsed)
+        
+        if remaining > 0:
+            mins = int(remaining // 60)
+            secs = int(remaining % 60)
             
-            if remaining > 0:
-                mins = int(remaining // 60)
-                secs = int(remaining % 60)
-                
-                with placeholder.container():
-                    st.markdown('<p class="break-title">☕ 잠시 휴식 시간입니다</p>', unsafe_allow_html=True)
-                    st.markdown('<p class="break-text">실험이 완료되었습니다. 참여해 주셔서 감사합니다.<br>잠시 휴식을 취한 후 다음 실험으로 이동해 주세요.</p>', unsafe_allow_html=True)
-                    st.markdown(f'<p class="timer-display">{mins:02d}:{secs:02d}</p>', unsafe_allow_html=True)
-                    st.progress(1 - (remaining / BREAK_DURATION))
-                
-                time.sleep(1)
-            else:
-                st.session_state.current_phase = 'done'
-                st.rerun()
-                break
+            st.markdown('<p class="break-title">☕ 잠시 휴식 시간입니다</p>', unsafe_allow_html=True)
+            st.markdown('<p class="break-text">실험이 완료되었습니다. 참여해 주셔서 감사합니다.<br>잠시 휴식을 취한 후 다음 실험으로 이동해 주세요.</p>', unsafe_allow_html=True)
+            st.markdown(f'<p class="timer-display">{mins:02d}:{secs:02d}</p>', unsafe_allow_html=True)
+            
+            # 휴식 전용 진행바
+            st.markdown(f"""
+            <div style="background:#f0f0f0; border-radius:10px; height:20px; margin:1rem 0;">
+                <div style="background:#222; width:{100*(1-remaining/BREAK_DURATION):.1f}%; height:100%; border-radius:10px;"></div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.session_state.current_phase = 'done'
+            st.rerun()
 
     elif phase == 'done':
         st.balloons()
