@@ -111,31 +111,35 @@ def get_rt():
 def get_current_question_number():
     return st.session_state.task_idx * 5 + st.session_state.item_idx + 1
 
+def fmt(x):
+    v = x / 10000
+    return f"{int(v)}만" if v == int(v) else f"{v}만"
+
 def get_question_text(task, item_idx):
     base = task['base']
     target = task['vals'][item_idx]
     task_type = task['type']
 
     if task_type == 'loss':
-        question = f"**{base:,}원**을 내야 하는 상황입니다. 어떻게 하시겠습니까?"
-        ss_txt = f"지금 {base:,}원 내기"
-        ll_txt = f"1년 뒤 {target:,}원 내기"
+        question = f"**{fmt(base)} 원**을 내야 하는 상황입니다. 어떻게 하시겠습니까?"
+        ss_txt = f"지금 {fmt(base)} 원 내기"
+        ll_txt = f"1년 뒤 {fmt(target)} 원 내기"
     elif task_type == 'pb':
         question = "다음 중 어떤 옵션을 선택하시겠습니까?"
-        ss_txt = f"12개월 후 {base:,}원 받기"
-        ll_txt = f"24개월 후 {target:,}원 받기"
+        ss_txt = f"12개월 후 {fmt(base)} 원 받기"
+        ll_txt = f"24개월 후 {fmt(target)} 원 받기"
     elif task_type == 'sub':
         question = "다음 중 어떤 옵션을 선택하시겠습니까?"
-        ss_txt = f"지금 {base:,}원 받기"
-        ll_txt = f"24개월 후 {target:,}원 받기"
+        ss_txt = f"지금 {fmt(base)} 원 받기"
+        ll_txt = f"24개월 후 {fmt(target)} 원 받기"
     elif task_type == 'speedup':
         question = "다음 중 어떤 옵션을 선택하시겠습니까?"
-        ss_txt = f"1년 뒤 {target:,}원을 앞당겨 지금 {base:,}원 받기"
-        ll_txt = f"원래대로 1년 뒤 {target:,}원 받기"
+        ss_txt = f"1년 뒤 {fmt(target)} 원을 앞당겨 지금 {fmt(base)} 원 받기"
+        ll_txt = f"원래대로 1년 뒤 {fmt(target)} 원 받기"
     else:
-        question = f"**{base:,}원**을 받을 수 있습니다. 어떻게 하시겠습니까?"
-        ss_txt = f"지금 {base:,}원 받기"
-        ll_txt = f"1년 뒤 {target:,}원 받기"
+        question = f"**{fmt(base)} 원**을 받을 수 있습니다. 어떻게 하시겠습니까?"
+        ss_txt = f"지금 {fmt(base)} 원 받기"
+        ll_txt = f"1년 뒤 {fmt(target)} 원 받기"
 
     return question, ss_txt, ll_txt, base, target
 
@@ -314,25 +318,27 @@ def main():
             st.rerun()
 
     elif phase == 'break':
-        elapsed = time.time() - st.session_state.break_start_time
-        remaining = max(0, BREAK_DURATION - elapsed)
+        placeholder = st.empty()
         
-        if remaining > 0:
-            mins = int(remaining // 60)
-            secs = int(remaining % 60)
+        while True:
+            elapsed = time.time() - st.session_state.break_start_time
+            remaining = max(0, BREAK_DURATION - elapsed)
             
-            st.markdown('<p class="break-title">☕ 잠시 휴식 시간입니다</p>', unsafe_allow_html=True)
-            st.markdown('<p class="break-text">실험이 완료되었습니다. 참여해 주셔서 감사합니다.<br>잠시 휴식을 취한 후 다음 실험으로 이동해 주세요.</p>', unsafe_allow_html=True)
-            
-            st.markdown(f'<p class="timer-display">{mins:02d}:{secs:02d}</p>', unsafe_allow_html=True)
-            
-            st.progress(1 - (remaining / BREAK_DURATION))
-            
-            time.sleep(1)
-            st.rerun()
-        else:
-            st.session_state.current_phase = 'done'
-            st.rerun()
+            if remaining > 0:
+                mins = int(remaining // 60)
+                secs = int(remaining % 60)
+                
+                with placeholder.container():
+                    st.markdown('<p class="break-title">☕ 잠시 휴식 시간입니다</p>', unsafe_allow_html=True)
+                    st.markdown('<p class="break-text">실험이 완료되었습니다. 참여해 주셔서 감사합니다.<br>잠시 휴식을 취한 후 다음 실험으로 이동해 주세요.</p>', unsafe_allow_html=True)
+                    st.markdown(f'<p class="timer-display">{mins:02d}:{secs:02d}</p>', unsafe_allow_html=True)
+                    st.progress(1 - (remaining / BREAK_DURATION))
+                
+                time.sleep(1)
+            else:
+                st.session_state.current_phase = 'done'
+                st.rerun()
+                break
 
     elif phase == 'done':
         st.balloons()
