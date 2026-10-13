@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 from datetime import datetime
 import time
@@ -251,15 +252,15 @@ def main():
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            name = st.text_input("참여자 이름(또는 ID)을 입력해주세요:", label_visibility="visible")
+            name = st.text_input("참여자 ID(숫자 5자리)를 입력해주세요:", label_visibility="visible")
             if st.button("시작하기", type="primary", use_container_width=True):
-                if name.strip():
+                if re.fullmatch(r"[0-9]{5}", name.strip()):
                     st.session_state.participant_name = name.strip()
                     st.session_state.current_phase = 'task'
                     reset_timer()
                     st.rerun()
                 else:
-                    st.warning("이름을 입력해주세요.")
+                    st.error("이전 탭(Qualtrics)에서 제시된 아이디(숫자 5자리)를 입력해주세요.")
 
     elif phase == 'task':
         t_idx = st.session_state.task_idx
