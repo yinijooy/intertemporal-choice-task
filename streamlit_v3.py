@@ -95,8 +95,10 @@ def init_session():
         st.session_state.participant_name = ""
     if 'question_start_time' not in st.session_state:
         st.session_state.question_start_time = time.time()
-    if 'processing' not in st.session_state:
-        st.session_state.processing = False
+    if 'saved' not in st.session_state:
+        st.session_state.saved = False
+    if 'save_ok' not in st.session_state:
+        st.session_state.save_ok = True
 
 # ==========================================
 # 3. 헬퍼 함수
@@ -166,8 +168,25 @@ def next_question():
         st.session_state.item_idx = 0
     else:
         # 설문 없이 바로 완료
-        save_to_sheets(st.session_state.responses, st.session_state.participant_name)
         st.session_state.current_phase = 'done'
+
+def handle_choice(choice, q_expected, ss_val, ll_val, task_id, item_num):
+    """버튼 콜백: 이미 처리된 문항에 대한 중복/지연 클릭은 무시"""
+    if st.session_state.current_phase != 'task':
+        return
+    if get_current_question_number() != q_expected:
+        return
+    record_response(choice, ss_val, ll_val, task_id, item_num)
+    next_question()
+
+def ensure_saved():
+    """마지막 문항 이후 화면이 뜬 다음 한 번만 Google Sheets에 저장"""
+    if not st.session_state.saved:
+        st.session_state.saved = True
+        st.session_state.save_ok = save_to_sheets(
+            st.session_state.responses, st.session_state.participant_name)
+    if not st.session_state.save_ok:
+        st.error("응답 저장에 실패했습니다. 연구자에게 알려주세요.")
 
 # ==========================================
 # 4. 스타일 설정
@@ -258,7 +277,6 @@ def main():
     init_session()
 
     phase = st.session_state.current_phase
-    disabled = st.session_state.processing
 
     # ===== INTRO =====
     if phase == 'intro':
@@ -309,18 +327,11 @@ def main():
         
         # 선택 버튼
         c1, c2 = st.columns(2)
-        if c1.button(ss_txt, use_container_width=True, disabled=disabled, key="btn_ss"):
-            st.session_state.processing = True
-            record_response('SS', ss_val, ll_val, task['id'], i_idx + 1)
-            next_question()
-            st.session_state.processing = False
-            st.rerun()
-        if c2.button(ll_txt, use_container_width=True, disabled=disabled, key="btn_ll"):
-            st.session_state.processing = True
-            record_response('LL', ss_val, ll_val, task['id'], i_idx + 1)
-            next_question()
-            st.session_state.processing = False
-            st.rerun()
+        q = current_q
+        c1.button(ss_txt, use_container_width=True, key=f"btn_ss_{q}",
+                  on_click=handle_choice, args=('SS', q, ss_val, ll_val, task['id'], i_idx + 1))
+        c2.button(ll_txt, use_container_width=True, key=f"btn_ll_{q}",
+                  on_click=handle_choice, args=('LL', q, ss_val, ll_val, task['id'], i_idx + 1))
 
     # ===== DONE =====
     elif phase == 'done':
@@ -338,6 +349,7 @@ def main():
                 "https://emo-stroop-101.streamlit.app/?mode=full&next=https://tom-101.streamlit.app/",
                 use_container_width=True
             )
+        ensure_saved()
 
 if __name__ == "__main__":
     main()
