@@ -78,6 +78,7 @@ TASKS = [
     {"id": "t6_speedup", "base": 500000, "vals": VALUES_SMALL, "type": "speedup"},
 ]
 
+BLANK_SEC = 2  # 응답 후 빈 화면 지속 시간(초)
 TOTAL_QUESTIONS = 30
 
 def init_session():
@@ -170,8 +171,10 @@ def handle_choice(choice, q_expected, ss_val, ll_val, task_id, item_num):
         return
     if get_current_question_number() != q_expected:
         return
+    # RT는 클릭 시점에 바로 기록하고, 다음 문항은 빈 화면(BLANK_SEC) 이후에 제시
     record_response(choice, ss_val, ll_val, task_id, item_num)
-    next_question()
+    st.session_state.blank_until = time.time() + BLANK_SEC
+    st.session_state.current_phase = 'blank'
 
 def ensure_saved():
     """마지막 문항 이후 화면이 뜬 다음 한 번만 Google Sheets에 저장"""
@@ -304,6 +307,22 @@ def main():
                   on_click=handle_choice, args=('SS', q, ss_val, ll_val, task['id'], i_idx + 1))
         c2.button(ll_txt, use_container_width=True, key=f"btn_ll_{q}",
                   on_click=handle_choice, args=('LL', q, ss_val, ll_val, task['id'], i_idx + 1))
+
+    # ===== BLANK (응답 직후 빈 화면) =====
+    elif phase == 'blank':
+        # 이전 문항의 잔상이 남지 않도록 숨김
+        st.markdown("""
+        <style>
+        .stButton, .stProgress, .question-text, .progress-counter { visibility: hidden; }
+        </style>
+        """, unsafe_allow_html=True)
+        remaining = st.session_state.get('blank_until', 0) - time.time()
+        if remaining > 0:
+            time.sleep(remaining)
+        st.session_state.current_phase = 'task'
+        next_question()  # 마지막 문항이면 break/done으로 phase가 바뀜
+        reset_timer()  # RT는 다음 문항이 실제로 화면에 뜬 시점부터 측정
+        st.rerun()
 
     elif phase == 'done':
         st.balloons()
